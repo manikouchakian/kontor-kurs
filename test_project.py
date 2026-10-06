@@ -4,6 +4,9 @@ from project import parse_rate, parse_date, calculate_conversion
 import sqlite3
 
 from project import init_db, save_rate, get_rate
+import subprocess
+import sys
+from pathlib import Path
 
 def test_parse_rate():
     assert parse_rate(" 1.20 ") == Decimal("1.20")
@@ -40,10 +43,10 @@ def test_calculate_conversion():
 
 
 def test_save_rate(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    init_db()
+    db_path = tmp_path / "rates.db"
+    init_db(db_path)
 
-    connection = sqlite3.connect("rates.db")
+    connection = sqlite3.connect(db_path)
 
     try:
         with connection:
@@ -74,3 +77,54 @@ def test_save_rate(tmp_path, monkeypatch):
 
     finally:
         connection.close()
+
+
+def test_convert_cli(tmp_path):
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    connection = sqlite3.connect(db_path)
+
+    try:
+        with connection:
+            save_rate(connection, "2026-09-30", "USD", Decimal("1.20"))
+            save_rate(connection, "2026-09-30", "GBP", Decimal("0.90"))
+    finally:
+        connection.close()
+
+    script = Path(__file__).resolve().with_name("project.py")
+
+    command = [
+        sys.executable,
+        str(script),
+        "convert",
+        "100",
+        "--from", "USD",
+        "--to", "GBP",
+        "--date", "2026-09-30",
+        "--db", str(db_path),
+    ]
+
+    result = subprocess.run(
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0
+    assert "100 USD = 75.00 GBP" in result.stdout
+
+    command[3] = "abc"
+
+    result = subprocess.run(
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert "Amount must be a number." in result.stderr

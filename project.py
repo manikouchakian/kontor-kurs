@@ -1,6 +1,6 @@
 import argparse
 import csv
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, DecimalException
 from datetime import date 
 import sqlite3 
 import sys 
@@ -103,15 +103,14 @@ def import_rates(csv_path=DEFAULT_CSV, db_path=DEFAULT_DB):
     try:
         with connection:
             with open(
-                "data/eurofxref-hist.csv",
+                csv_path,
                 encoding="utf-8-sig",
                 newline="",
             ) as file:
                 reader = csv.DictReader(file)
 
                 if not reader.fieldnames or "Date" not in reader.fieldnames:
-                    print("CSV must contain a Date column.")
-                    return
+                    raise ValueError("CSV must contain a Date column.")
 
                 for row in reader:
                     if None in row or None in row.values():
@@ -176,31 +175,34 @@ def parse_date(value):
     return parsed.isoformat()
 
 
-def convert_currency(amount, source, target, rate_date):
+def convert_currency(amount, source, target, rate_date, db_path=DEFAULT_DB):
     try:
         amount = Decimal(amount)
     except InvalidOperation:
-        print("Amount must be a number.")
-        return
+        raise ValueError("Amount must be a number.") from None
 
     if not amount.is_finite() or amount < 0:
-        print("Amount must be finite and non-negative.")
-        return
+        raise ValueError("Amount must be finite and non-negative.")
 
     rate_date = parse_date(rate_date)
 
     if rate_date is None:
-        print("Please provide a valid date in YYYY-MM-DD format.")
-        return
+        raise ValueError("Please provide a valid date in YYYY-MM-DD format.")
 
     source = source.strip().upper()
     target = target.strip().upper()
 
-    try:
-        connection = sqlite3.connect("file:rates.db?mode=ro", uri=True)
-    except sqlite3.OperationalError:
-        print("Cannot open rates.db. Run import first or check the file.")
-        return
+    db_path = Path(db_path).expanduser().resolve()
+
+    if not db_path.is_file():
+        raise FileNotFoundError(
+            f"Database not found: {db_path}. Run import first."
+        )
+
+    connection = sqlite3.connect(
+        db_path.as_uri() + "?mode=ro",
+        uri=True,
+    )
 
     try:
         row = connection.execute(
@@ -209,8 +211,7 @@ def convert_currency(amount, source, target, rate_date):
         ).fetchone()
 
         if row is None:
-            print("No stored rates for this date.")
-            return
+            raise ValueError("No stored rates for this date.")
 
         source_rate = (
             Decimal("1")
@@ -225,8 +226,9 @@ def convert_currency(amount, source, target, rate_date):
         )
 
         if source_rate is None or target_rate is None:
-            print("A currency is unknown or its rate is missing for this date.")
-            return
+            raise ValueError(
+                "A currency is unknown or its rate is missing for this date."
+            )
 
         result = calculate_conversion(amount, source_rate, target_rate)
 
@@ -236,12 +238,13 @@ def convert_currency(amount, source, target, rate_date):
         connection.close()
 
 
+        
 def show_stats():
     print("Stats: coming next!")
 
 
-def init_db():
-    connection = sqlite3.connect("rates.db")
+def init_db(db_path=DEFAULT_DB):
+    connection = sqlite3.connect(db_path)
 
     try:
         with connection:
@@ -294,4 +297,4 @@ def calculate_conversion(amount, source_rate, target_rate):
     return amount * target_rate / source_rate
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
