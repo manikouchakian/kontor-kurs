@@ -90,68 +90,95 @@ def main():
 
     return 0
 
+
+
+def validate_headers(fieldnames):
+    if not fieldnames:
+        raise ValueError("CSV is empty or has no header.")
+
+    headers = []
+
+    for name in fieldnames:
+        name = name.strip()
+
+        if name.lower() == "date":
+            name = "Date"
+        else:
+            name = name.upper()
+
+        headers.append(name)
+
+    if "Date" not in headers:
+        raise ValueError("CSV must contain a Date column.")
+
+    named_headers = [name for name in headers if name]
+
+    if len(named_headers) != len(set(named_headers)):
+        raise ValueError("Duplicate column names are not allowed.")
+
+    return headers
+
+
+def read_rates(csv_path, skipped):
+    with open(csv_path, encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        reader.fieldnames = validate_headers(reader.fieldnames)
+
+        for row in reader:
+            if None in row or None in row.values():
+                skipped["rows"] += 1
+                continue
+
+            rate_date = parse_date(row["Date"])
+
+            if rate_date is None:
+                skipped["rows"] += 1
+                continue
+
+            for currency, value in row.items():
+                if currency == "Date" or not currency:
+                    continue
+
+                rate = parse_rate(value)
+
+                if rate is None:
+                    skipped["rates"] += 1
+                    continue
+
+                yield rate_date, currency, rate
+
+
 def import_rates(csv_path=DEFAULT_CSV, db_path=DEFAULT_DB):
     init_db(db_path)
 
     inserted_rates = 0
     duplicate_rates = 0
-    skipped_rates = 0
-    skipped_rows = 0
+    skipped = {"rows": 0, "rates": 0}
 
     connection = sqlite3.connect(db_path)
 
     try:
         with connection:
-            with open(
-                csv_path,
-                encoding="utf-8-sig",
-                newline="",
-            ) as file:
-                reader = csv.DictReader(file)
+            for rate_date, currency, rate in read_rates(csv_path, skipped):
+                inserted = save_rate(
+                    connection,
+                    rate_date,
+                    currency,
+                    rate,
+                )
 
-                if not reader.fieldnames or "Date" not in reader.fieldnames:
-                    raise ValueError("CSV must contain a Date column.")
-
-                for row in reader:
-                    if None in row or None in row.values():
-                        skipped_rows += 1
-                        continue
-
-                    rate_date = parse_date(row["Date"])
-
-                    if rate_date is None:
-                        skipped_rows += 1
-                        continue
-
-                    for currency, value in row.items():
-                        if currency == "Date" or not currency.strip():
-                            continue
-
-                        rate = parse_rate(value)
-
-                        if rate is None:
-                            skipped_rates += 1
-                            continue
-
-                        inserted = save_rate(
-                            connection,
-                            rate_date,
-                            currency.strip(),
-                            rate,
-                        )
-
-                        if inserted == 1:
-                            inserted_rates += 1
-                        else:
-                            duplicate_rates += 1
-
-        print("Inserted rates:", inserted_rates)
-        print("Duplicate rates:", duplicate_rates)
-        print("Skipped rates:", skipped_rates)
-        print("Skipped rows:", skipped_rows)
+                if inserted == 1:
+                    inserted_rates += 1
+                else:
+                    duplicate_rates += 1
 
     finally:
         connection.close()
+
+    print("Inserted rates:", inserted_rates)
+    print("Duplicate rates:", duplicate_rates)
+    print("Skipped rates:", skipped["rates"])
+    print("Skipped rows:", skipped["rows"])
     
 
 def parse_rate(value):

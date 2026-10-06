@@ -33,3 +33,13 @@ The program reports expected errors with a short message. It returns exit code 0
 Tests check input validation, conversion calculations, duplicate handling, and the conversion command.
 
 Database tests use temporary files so they do not change the project's real database.
+
+## CSV validation
+
+CSV reading and validation are separate from database writes. This allows the input-processing code to be tested without SQLite.
+
+Column names are trimmed and currency names are converted to uppercase. Duplicate named columns are rejected to prevent one value from silently replacing another.
+
+Invalid dates or incomplete rows cause the whole row to be skipped. An invalid rate only causes that individual rate to be skipped.
+
+Valid rates are yielded one at a time, so the importer does not need to hold the entire dataset in memory.
