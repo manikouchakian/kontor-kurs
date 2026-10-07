@@ -3,7 +3,7 @@ from decimal import Decimal
 from project import parse_rate, parse_date, calculate_conversion
 import sqlite3
 
-from project import init_db, save_rate, get_rate,validate_headers,read_rates
+from project import init_db, save_rate, get_rate,validate_headers,read_rates, get_stats
 import subprocess
 import sys
 from pathlib import Path
@@ -168,3 +168,32 @@ def test_read_rates(tmp_path):
     ]
 
     assert skipped == {"rows": 2, "rates": 2}
+
+def test_get_stats(tmp_path):
+    db_path = tmp_path / "stats.db"
+    init_db(db_path)
+
+    connection = sqlite3.connect(db_path)
+
+    try:
+        with connection:
+            save_rate(connection, "2026-10-03", "USD", Decimal("2"))
+            save_rate(connection, "2026-10-01", "USD", Decimal("9"))
+            save_rate(connection, "2026-10-02", "USD", Decimal("10"))
+            save_rate(connection, "2026-10-01", "GBP", Decimal("100"))
+
+        stats = get_stats(connection, " usd ")
+
+        assert stats == {
+            "count": 3,
+            "first_date": "2026-10-01",
+            "last_date": "2026-10-03",
+            "minimum": Decimal("2"),
+            "maximum": Decimal("10"),
+            "average": Decimal("7"),
+        }
+
+        assert get_stats(connection, "XYZ") is None
+
+    finally:
+        connection.close()

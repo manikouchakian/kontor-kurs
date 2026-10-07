@@ -5,6 +5,8 @@ from datetime import date
 import sqlite3 
 import sys 
 from pathlib import Path
+from tabulate import tabulate
+
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -54,7 +56,19 @@ def main():
         help="Path to the SQLite database",
     )
 
-    commands.add_parser("stats", help="Show statistics")
+    stats_parser = commands.add_parser(
+        "stats",
+        help="Show statistics for a currency",
+    )
+
+    stats_parser.add_argument("currency")
+
+    stats_parser.add_argument(
+        "--db",
+        type=Path,
+        default=DEFAULT_DB,
+        help="Path to the SQLite database",
+    )
 
     args = parser.parse_args()
 
@@ -75,7 +89,10 @@ def main():
             )
 
         elif args.command == "stats":
-            show_stats()
+            show_stats(
+                args.currency,
+                args.db.expanduser(),
+            )
 
     except (
         OSError,
@@ -89,8 +106,6 @@ def main():
         return 1
 
     return 0
-
-
 
 def validate_headers(fieldnames):
     if not fieldnames:
@@ -266,8 +281,47 @@ def convert_currency(amount, source, target, rate_date, db_path=DEFAULT_DB):
 
 
         
-def show_stats():
-    print("Stats: coming next!")
+def show_stats(currency, db_path=DEFAULT_DB):
+    currency = currency.strip().upper()
+    db_path = Path(db_path).expanduser().resolve()
+
+    if not db_path.is_file():
+        raise FileNotFoundError(
+            f"Database not found: {db_path}. Run import first."
+        )
+
+    connection = sqlite3.connect(
+        db_path.as_uri() + "?mode=ro",
+        uri=True,
+    )
+
+    try:
+        stats = get_stats(connection, currency)
+    finally:
+        connection.close()
+
+    if stats is None:
+        raise ValueError("No stored rates for this currency.")
+
+    table = [
+        ["Currency", currency],
+        ["Count", stats["count"]],
+        ["First date", stats["first_date"]],
+        ["Last date", stats["last_date"]],
+        ["Minimum", f"{stats['minimum']:.6f}"],
+        ["Maximum", f"{stats['maximum']:.6f}"],
+        ["Average", f"{stats['average']:.6f}"],
+    ]
+
+    print("Rates are quoted per 1 EUR.")
+    print(
+        tabulate(
+            table,
+            headers=["Metric", "Value"],
+            tablefmt="simple",
+            disable_numparse=True,
+        )
+    )
 
 
 def init_db(db_path=DEFAULT_DB):
@@ -318,6 +372,34 @@ def get_rate(connection, rate_date, currency):
         return None
 
     return Decimal(row[0])
+
+
+def get_stats(connection, currency):
+    currency = currency.strip().upper()
+
+    rows = connection.execute(
+        """
+        SELECT date, rate
+        FROM rates
+        WHERE currency = ?
+        ORDER BY date
+        """,
+        (currency,),
+    ).fetchall()
+
+    if not rows:
+        return None
+
+    rates = [Decimal(row[1]) for row in rows]
+
+    return {
+        "count": len(rates),
+        "first_date": rows[0][0],
+        "last_date": rows[-1][0],
+        "minimum": min(rates),
+        "maximum": max(rates),
+        "average": sum(rates) / len(rates),
+    }
 
 
 def calculate_conversion(amount, source_rate, target_rate):
