@@ -43,3 +43,17 @@ Column names are trimmed and currency names are converted to uppercase. Duplicat
 Invalid dates or incomplete rows cause the whole row to be skipped. An invalid rate only causes that individual rate to be skipped.
 
 Valid rates are yielded one at a time, so the importer does not need to hold the entire dataset in memory.
+
+## Statistics
+
+Statistics use all stored observations for the requested currency. Rates are converted from text to Decimal before calculating minimum, maximum, and arithmetic mean. This avoids comparing numeric values as strings.
+
+Dates are sorted to identify the first and last observation. The output shows the observation count because missing dates mean that the dataset is not necessarily continuous.
+
+EUR is handled as a rate of one during conversions. Statistics only describe currencies actually stored in the database.
+
+## Dates and rounding
+
+Conversions require the exact requested date. The application does not silently substitute an earlier business day because that would change the date chosen by the user.
+
+Calculations use Python's default Decimal context: 28 significant digits and half-even rounding. Conversion results display two decimal places, while statistics display six. This is a consistent display policy rather than currency-specific accounting support.
